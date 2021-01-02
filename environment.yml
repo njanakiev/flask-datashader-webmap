@@ -1,0 +1,21 @@
+name: base
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - pillow
+  - numpy
+  - pandas
+  - numba
+  - matplotlib
+  - pyproj
+  - shapely
+  - geopandas
+  - mercantile
+  - datashader
+  - gunicorn
+  - Flask
+  - pip:
+    - python-dotenv==0.14.0
