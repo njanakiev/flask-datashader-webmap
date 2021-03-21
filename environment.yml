@@ -1,4 +1,4 @@
-name: pa
+name: base
 channels:
   - conda-forge
   - defaults
