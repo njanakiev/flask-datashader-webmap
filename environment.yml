@@ -1,4 +1,4 @@
-name: base
+name: pa
 channels:
   - conda-forge
   - defaults
@@ -9,13 +9,10 @@ dependencies:
   - numpy
   - pandas
   - numba
-  - matplotlib
-  - pyproj
-  - shapely
-  - geopandas
   - mercantile
   - datashader
   - gunicorn
+  - pyarrow
   - Flask
   - pip:
     - python-dotenv==0.14.0
