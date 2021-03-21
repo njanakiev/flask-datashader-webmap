@@ -14,7 +14,8 @@ app = Flask(__name__)
 app.logger.setLevel(logging.DEBUG)
 app.config.from_pyfile("config.py")
 
-df = pd.read_csv(app.config["DATA_FILEPATH"])
+df = pd.read_parquet(
+    app.config["DATA_FILEPATH"], engine='pyarrow')
 
 
 def create_pillow_tile(x, y, zoom):
@@ -35,12 +36,12 @@ def create_pillow_tile(x, y, zoom):
 
 
 def create_datashader_tile(df, x, y, zoom):
-    bounds = mercantile.xy_bounds(
+    xy_bounds = mercantile.xy_bounds(
         mercantile.Tile(x, y, zoom))
 
     cvs = ds.Canvas(plot_width=256, plot_height=256,
-            x_range=(bounds[0], bounds[2]), 
-            y_range=(bounds[1], bounds[3]))
+            x_range=(xy_bounds[0], xy_bounds[2]),
+            y_range=(xy_bounds[1], xy_bounds[3]))
 
     agg = cvs.points(df, 'x', 'y', agg=ds.count())
     img = tf.shade(agg,
@@ -52,7 +53,7 @@ def create_datashader_tile(df, x, y, zoom):
 
 
 @app.route('/')
-def hello_world():
+def index():
     return render_template("index.html")
 
 
