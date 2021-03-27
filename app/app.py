@@ -9,6 +9,9 @@ from datashader import transfer_functions as tf
 from flask import Flask, send_file, render_template
 from PIL import Image, ImageDraw
 
+import geopandas as gpd
+import shapely.geometry
+
 
 app = Flask(__name__)
 app.logger.setLevel(logging.DEBUG)
@@ -16,6 +19,9 @@ app.config.from_pyfile("config.py")
 
 df = pd.read_parquet(
     app.config["DATA_FILEPATH"], engine='pyarrow')
+gdf = gpd.GeoDataFrame(df,
+    geometry=gpd.GeoSeries.from_wkb(df['geometry']),
+    crs='EPSG:4326')
 
 
 def create_pillow_tile(x, y, zoom):
@@ -35,15 +41,19 @@ def create_pillow_tile(x, y, zoom):
     return img
 
 
-def create_datashader_tile(df, x, y, zoom):
-    xy_bounds = mercantile.xy_bounds(
-        mercantile.Tile(x, y, zoom))
+def create_datashader_tile(gdf, x, y, zoom):
+    tile = mercantile.Tile(x, y, zoom)
 
+    bounds = mercantile.bounds(tile)
+    geom = shapely.geometry.box(*bounds)
+    mask = gdf.within(geom)
+
+    xy_bounds = mercantile.xy_bounds(tile)
     cvs = ds.Canvas(plot_width=256, plot_height=256,
             x_range=(xy_bounds[0], xy_bounds[2]),
             y_range=(xy_bounds[1], xy_bounds[3]))
 
-    agg = cvs.points(df, 'x', 'y', agg=ds.count())
+    agg = cvs.points(gdf[mask], 'x', 'y', agg=ds.count())
     img = tf.shade(agg,
         cmap=['blue', 'darkblue', 'black'],
         how='eq_hist')
@@ -67,13 +77,13 @@ def tile(x, y, zoom):
 
         if not os.path.exists(filepath):
             app.logger.debug(f"Create image for {filepath}")
-            img = create_datashader_tile(df, x, y, zoom)
+            img = create_datashader_tile(gdf, x, y, zoom)
             os.makedirs(folderpath, exist_ok=True)   
             img.save(filepath, 'PNG')
     
         return send_file(filepath, mimetype='image/png')
     else:
-        img = create_datashader_tile(df, x, y, zoom)
+        img = create_datashader_tile(gdf, x, y, zoom)
         img_bytes = io.BytesIO()
         img.save(img_bytes, 'PNG')
         img_bytes.seek(0)

@@ -7,6 +7,8 @@ import pyarrow as pa
 import dask.dataframe as dd
 from dask.distributed import Client
 
+import shapely.geometry
+
 RADIUS_EARTH = 6378137.0
 
 
@@ -16,6 +18,7 @@ def convert(src_filepath, dst_filepath):
     schema = pa.schema([
         pa.field('x', pa.float32()),
         pa.field('y', pa.float32()),
+        pa.field('geom', pa.binary())
     ])
     
     df = dd.read_csv(src_filepath,
@@ -35,7 +38,12 @@ def convert(src_filepath, dst_filepath):
     df['y'] = RADIUS_EARTH * np.log(
         np.tan((np.pi * 0.25) + (0.5 * np.radians(df['lat']))))
 
-    df[['x', 'y']].to_parquet(
+    df['geom'] = df.apply(
+        lambda row: shapely.geometry.Point(row['lon'], row['lat']).wkb,
+        meta=pd.Series(dtype=object, name='geom'),
+        axis=1)
+
+    df.to_parquet(
         dst_filepath,
         schema=schema,
         engine='pyarrow',

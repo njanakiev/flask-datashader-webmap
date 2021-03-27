@@ -13,6 +13,8 @@ dependencies:
   - datashader
   - gunicorn
   - pyarrow
+  - geopandas==0.9.0
+  - pygeos
   - Flask
   - pip:
     - python-dotenv==0.14.0
