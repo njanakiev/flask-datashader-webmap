@@ -6,10 +6,15 @@ import pandas as pd
 import pyarrow as pa
 import dask.dataframe as dd
 from dask.distributed import Client
-
-import shapely.geometry
+import pygeos
 
 RADIUS_EARTH = 6378137.0
+
+
+def calculate_geometry(df):
+    df['geom'] = pygeos.io.to_wkb(
+        pygeos.creation.points(df['lon'], df['lat']))
+    return df
 
 
 def convert(src_filepath, dst_filepath):
@@ -22,6 +27,7 @@ def convert(src_filepath, dst_filepath):
     ])
     
     df = dd.read_csv(src_filepath,
+                     skiprows=1,
                      names=['lat', 'lon'],
                      dtype=DTYPES)
     
@@ -38,10 +44,15 @@ def convert(src_filepath, dst_filepath):
     df['y'] = RADIUS_EARTH * np.log(
         np.tan((np.pi * 0.25) + (0.5 * np.radians(df['lat']))))
 
-    df['geom'] = df.apply(
-        lambda row: shapely.geometry.Point(row['lon'], row['lat']).wkb,
-        meta=pd.Series(dtype=object, name='geom'),
-        axis=1)
+    df = df.map_partitions(
+        calculate_geometry,
+        meta={
+            'lat': np.float64,
+            'lon': np.float64,
+            'x': np.float64,
+            'y': np.float64,
+            'geom': object
+        })
 
     df.to_parquet(
         dst_filepath,
