@@ -6,24 +6,26 @@ import pandas as pd
 import pyarrow as pa
 import dask.dataframe as dd
 from dask.distributed import Client
-import pygeos
+import quadkey
 
 RADIUS_EARTH = 6378137.0
 
 
-def calculate_geometry(df):
-    df['geom'] = pygeos.io.to_wkb(
-        pygeos.creation.points(df['lon'], df['lat']))
-    return df
+def calculate_quadkeys(df):
+    df['quadkey'] = df.apply(
+        lambda row: quadkey.lonlat2quadint(
+            row['lon'], row['lat']),
+        axis=1)
+    return df[['x', 'y', 'quadkey']]
 
 
-def convert(src_filepath, dst_filepath):
+def preprocess(src_filepath, dst_filepath):
     # Decrease size to minimum
     DTYPES = { "lat": np.float32, "lon": np.float32 }
     schema = pa.schema([
-        pa.field('x', pa.float32()),
-        pa.field('y', pa.float32()),
-        pa.field('geom', pa.binary())
+        pa.field('x',       pa.float32()),
+        pa.field('y',       pa.float32()),
+        pa.field('quadkey', pa.uint64())
     ])
     
     df = dd.read_csv(src_filepath,
@@ -47,11 +49,9 @@ def convert(src_filepath, dst_filepath):
     df = df.map_partitions(
         calculate_geometry,
         meta={
-            'lat': np.float64,
-            'lon': np.float64,
             'x': np.float64,
             'y': np.float64,
-            'geom': object
+            'quadkey': np.uint64
         })
 
     df.to_parquet(
@@ -61,16 +61,37 @@ def convert(src_filepath, dst_filepath):
         compression='snappy')
 
 
+def sort_quadkeys(src_filepath, dst_filepath):
+    df = dd.read_parquet(src_filepath,
+                         engine='pyarrow')
+
+    df.set_index("quadkey", shuffle="disk") \
+        .to_parquet(dst_filepath,
+                    engine='pyarrow',
+                    compression='snappy')
+
+
 if __name__ == '__main__':
-    client = Client(memory_limit='3GB', processes=True)
+    client = Client(memory_limit='3GB', 
+                    processes=True,
+                    n_workers=4)
     print("Dashboard Link", client.dashboard_link)
 
     src_filepath = "data/simple-gps-points-120312.txt"
+    tmp_filepath = "data/tmp.snappy.parq"
     dst_filepath = "data/gps_osm_xy.snappy.parq"
-
+    
+    if os.path.exists(tmp_filepath):
+        shutil.rmtree(tmp_filepath)
     if os.path.exists(dst_filepath):
         shutil.rmtree(dst_filepath)
     
+    print("PREPROCESS")
     t = time.time()
-    convert(src_filepath, dst_filepath)
+    preprocess(src_filepath, dst_filepath)
+    print(f"Duration: {time.time() - t:.4f}")
+
+    print("SORT")
+    t = time.time()
+    sort_quadkeys(tmp_filepath, dst_filepath)
     print(f"Duration: {time.time() - t:.4f}")
