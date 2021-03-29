@@ -3,57 +3,59 @@ import io
 import logging
 import numpy as np
 import pandas as pd
-import mercantile
 import datashader as ds
 from datashader import transfer_functions as tf
 from flask import Flask, send_file, render_template
 from PIL import Image, ImageDraw
 
-import geopandas as gpd
-import shapely.geometry
+import dask.dataframe as dd
+from dask.distributed import Client
+import quadkey
 
 
 app = Flask(__name__)
 app.logger.setLevel(logging.DEBUG)
 app.config.from_pyfile("config.py")
 
-df = pd.read_parquet(
-    app.config["DATA_FILEPATH"], engine='pyarrow')
-gdf = gpd.GeoDataFrame(df,
-    geometry=gpd.GeoSeries.from_wkb(df['geometry']),
-    crs='EPSG:4326')
-
 
 def create_pillow_tile(x, y, zoom):
-    img = Image.new('RGB', 
-        size=(256, 256), 
+    img = Image.new('RGB',
+        size=(256, 256),
         color=(200, 200, 200))
     draw = ImageDraw.Draw(img)
-    draw.rectangle([5, 5, 250, 250], 
-        width=2, 
+    draw.rectangle([5, 5, 250, 250],
+        width=2,
         outline=(220, 220, 220))
     text = f"{x},{y},{zoom}"
     w, h = draw.textsize(text)
-    draw.text((128 - w/2, 128 - h/2), 
-        text=text, 
+    draw.text((128 - w/2, 128 - h/2),
+        text=text,
         fill=(150, 150, 150))
 
     return img
 
 
-def create_datashader_tile(gdf, x, y, zoom):
-    tile = mercantile.Tile(x, y, zoom)
+def create_datashader_tile(src_filepath, x, y, zoom):
+    qk = quadkey.xyz2quadint(x, y, zoom)
 
-    bounds = mercantile.bounds(tile)
-    geom = shapely.geometry.box(*bounds)
-    mask = gdf.within(geom)
+    xy_bounds = quadkey.tile2bbox_webmercator(qk, zoom)
+    qk1, qk2 = quadkey.tile2range(qk, zoom)
 
-    xy_bounds = mercantile.xy_bounds(tile)
+    filters = [("quadkey", ">", np.uint64(qk1)),
+               ("quadkey", "<", np.uint64(qk2))]
+
+    df = dd.read_parquet(
+        src_filepath, 
+        filters=filters, 
+        engine='pyarrow',
+        columns=['x', 'y'])
+
+    mask = (qk1 < df.index) & (df.index < qk2)
+
     cvs = ds.Canvas(plot_width=256, plot_height=256,
-            x_range=(xy_bounds[0], xy_bounds[2]),
-            y_range=(xy_bounds[1], xy_bounds[3]))
-
-    agg = cvs.points(gdf[mask], 'x', 'y', agg=ds.count())
+        x_range=(xy_bounds[0], xy_bounds[2]), 
+        y_range=(xy_bounds[1], xy_bounds[3]))
+    agg = cvs.points(df.loc[mask], 'x', 'y', agg=ds.count())
     img = tf.shade(agg,
         cmap=['blue', 'darkblue', 'black'],
         how='eq_hist')
@@ -71,19 +73,21 @@ def index():
 def tile(x, y, zoom):
     if app.config["IS_CACHED"]:
         folderpath = os.path.join(
-            app.config['TILES_FOLDERPATH'], 
+            app.config['TILES_FOLDERPATH'],
             f"tiles/{zoom}/{x}")
         filepath = os.path.join(folderpath, f"{y}.png")
 
         if not os.path.exists(filepath):
             app.logger.debug(f"Create image for {filepath}")
-            img = create_datashader_tile(gdf, x, y, zoom)
+            img = create_datashader_tile(
+                app.config["DATA_FILEPATH"], x, y, zoom)
             os.makedirs(folderpath, exist_ok=True)   
             img.save(filepath, 'PNG')
     
         return send_file(filepath, mimetype='image/png')
     else:
-        img = create_datashader_tile(gdf, x, y, zoom)
+        img = create_datashader_tile(
+            app.config["DATA_FILEPATH"], x, y, zoom)
         img_bytes = io.BytesIO()
         img.save(img_bytes, 'PNG')
         img_bytes.seek(0)

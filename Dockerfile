@@ -1,5 +1,10 @@
 FROM continuumio/miniconda3:4.7.12
 
+RUN apt update -qq \
+ && apt install -y gcc libc-dev --no-install-recommends \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY environment.yml /app/environment.yml
