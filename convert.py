@@ -30,6 +30,7 @@ def preprocess(src_filepath, dst_filepath):
     
     df = dd.read_csv(src_filepath,
                      skiprows=1,
+                     blocksize="20MB",
                      names=['lat', 'lon'],
                      dtype=DTYPES)
     
@@ -47,10 +48,10 @@ def preprocess(src_filepath, dst_filepath):
         np.tan((np.pi * 0.25) + (0.5 * np.radians(df['lat']))))
 
     df = df.map_partitions(
-        calculate_geometry,
+        calculate_quadkeys,
         meta={
-            'x': np.float64,
-            'y': np.float64,
+            'x': np.float32,
+            'y': np.float32,
             'quadkey': np.uint64
         })
 
